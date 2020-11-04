@@ -31,15 +31,32 @@ def nonzero_times_in_result(var):
     return {k[:-1]: k[-1] for k, v in var.items() if v.x > 0.0}
 
 
+def extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, due, c):
+    I += [len(I)]
+
+    def add_entry_for_external_good(param1d):
+        return [param1d[i - 1] if i > 0 else -1 for i in I]
+
+    def add_row_for_external_good(param2d):
+        return [[param2d[i - 1][k] if i > 0 else -1 for k in K] for i in I]
+
+    ekt, eks = map(add_row_for_external_good, [ekt, eks])
+    due, c = map(add_entry_for_external_good, [due, c])
+
+    return I, ekt, eks, due, c
+
+
 def solve(instance):
     origin_restricted = False
 
+    # first good i=0 is external (dummy) good
     # first component k=0 is fan. disassembly: outside -> inside (fan is first), reassembly: inside -> outside (fan is last)
-    # first good i=0 is for items/pieces from external source
     # first damage pattern s=0 is 'good as new', increasing pattern means increased damage
 
     I, K, S, T = sets_from_instance(instance)
     ekt, eks, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
+
+    I, ekt, eks, due, c = extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, due, c)
 
     try:
         m = gp.Model("regeneration-planning-mip")
@@ -50,18 +67,18 @@ def solve(instance):
         def ub_for_z(i, k, s, t):
             return 0.0 if t == len(T) or s == 0 or (origin_restricted and s > 0) else GRB.INFINITY
 
-        z = binvar(m, 'z', [I, K, S, T], ub=ub_for_z) # repair
-        w = binvar(m, 'w', [K, S, T]) # order
+        z = binvar(m, 'z', [I, K, S, T], ub=ub_for_z)  # repair internal
+        w = binvar(m, 'w', [K, S, T])  # order
 
-        x = binvar(m, 'x', [I, K, T]) # provisioning
-        xint = binvar(m, 'xint', [I, K, T]) # provision internal
-        xext = binvar(m, 'xext', [I, K, T]) # provision external
+        x = binvar(m, 'x', [I, K, T])  # provisioning
+        xint = binvar(m, 'xint', [I, K, T])  # provision internal
+        xext = binvar(m, 'xext', [I, K, T])  # provision external
 
-        Y = posvar(m, 'Y', [I, K, S, T], ub=ub_for_y) # inventory levels
-        v = posvar(m, 'v', [I]) # delays
+        Y = posvar(m, 'Y', [I, K, S, T], ub=ub_for_y)  # inventory levels
+        v = posvar(m, 'v', [I])  # delays
 
         def setup_objective():
-            delay_costs = gp.quicksum(c[i] * v[i] for i in I)
+            delay_costs = gp.quicksum(c[i] * v[i] for i in I[1:])
             housing_costs = gp.quicksum(hc[k][s] * Y[(i, k, s, t)] for i in I for k in K for s in S for t in T)
             order_costs = gp.quicksum(bc[k][s] * w[(k, s, t)] for k in K for s in S for t in T)
             m.setObjective(delay_costs + housing_costs + order_costs, GRB.MINIMIZE)
@@ -121,6 +138,8 @@ def solve(instance):
 
         m.optimize()
 
+        #xsraw = [[[x[(i, k, t)].x for t in T] for k in K] for i in I]
+
         return dict(
             repair_starts=nonzero_times_in_result(z),
             order_starts=nonzero_times_in_result(w),
@@ -131,8 +150,7 @@ def solve(instance):
             total_costs=m.objVal)
 
     except gp.GurobiError as e:
-        print('Error code ' + str(e.errno) + ': ' + str(e))
-
+        print(f'Error code {e.errno}: {e}')
     except AttributeError:
         print('Encountered an attribute error')
 

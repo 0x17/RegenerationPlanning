@@ -1,5 +1,5 @@
 def sets_from_instance(instance):
-    return (range(instance[k]) for k in ['ngoods', 'ncomponents', 'ndamagepatterns', 'nperiods'])
+    return (list(range(instance[k])) for k in ['ngoods', 'ncomponents', 'ndamagepatterns', 'nperiods'])
 
 
 def values_from_instance(instance):
