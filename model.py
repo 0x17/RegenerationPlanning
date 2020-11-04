@@ -169,16 +169,22 @@ def solve(instance):
 def print_results(instance, res_dict):
     print(f'Costs of this regeneration plan are in total {res_dict["total_costs"]} monetary units')
 
-    def inc(coll):
-        return tuple(v+1 for v in coll)
+    def inc(tpl):
+        return tuple(v+1 for v in tpl)
 
-    def print_result_line(caption, res_dict_key, sep=', '):
+    def named(index_names, tpl):
+        assert(len(index_names) == len(tpl))
+        return '(' + ';'.join(f'{index_names[ix]}={v}' for ix, v in enumerate(tpl)) + ')'
+
+    def print_result_line(caption, res_dict_key, index_names_str, sep=', '):
         newline = '\n'
-        print(f'{caption}:{sep if sep == newline else " "}{sep.join("piece " + str(inc(k)) + " at " + str(v) for k, v in res_dict[res_dict_key].items())}')
+        index_names = list(index_names_str)
+        print(f'{caption}:{sep if sep == newline else " "}{sep.join("piece " + str(named(index_names, inc(k))) + " at " + str(v) for k, v in res_dict[res_dict_key].items())}')
 
-    print_result_line('Repairs', 'repair_starts')
-    print_result_line('Orders', 'order_starts')
-    print_result_line('Provisioning times', 'ready_times', sep='\n')
+    print_result_line('Repairs', 'repair_starts', 'iks')
+    print_result_line('Orders', 'order_starts', 'ks')
+    print_result_line('Provisioning times', 'ready_times', 'ik', sep='\n')
+
     for i in range(instance['ngoods']):
         print(f'Delay of good {i+1} is {res_dict["delays"][i]} time units')
 
