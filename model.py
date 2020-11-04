@@ -19,11 +19,11 @@ def common_var(model, name, ranges, vtype, lb=0, ub=GRB.INFINITY):
     return {tuple: model.addVar(vtype=vtype, lb=lb, ub=ub_fn(tuple), name=name + '_' + '_'.join(strs(tuple))) for tuple in itertools.product(*ranges)}
 
 
-def binvar(model, name, ranges, ub):
+def binvar(model, name, ranges, ub=1.0):
     return common_var(model, name, ranges, GRB.BINARY, ub=ub)
 
 
-def posvar(model, name, ranges, ub):
+def posvar(model, name, ranges, ub=GRB.INFINITY):
     return common_var(model, name, ranges, GRB.CONTINUOUS, ub=ub)
 
 
@@ -50,14 +50,15 @@ def solve(instance):
         def ub_for_z(i, k, s, t):
             return 0.0 if t == len(T) or s == 0 or (origin_restricted and s > 0) else GRB.INFINITY
 
-        z = binvar(m, 'z', [I, K, S, T], ub=ub_for_z)
-        w = binvar(m, 'w', [K, S, T])
-        x = binvar(m, 'x', [I, K, T])
-        xint = binvar(m, 'xint', [I, K, T])
-        xext = binvar(m, 'xext', [I, K, T])
+        z = binvar(m, 'z', [I, K, S, T], ub=ub_for_z) # repair
+        w = binvar(m, 'w', [K, S, T]) # order
 
-        Y = posvar(m, 'Y', [I, K, S, T], ub=ub_for_y)
-        v = posvar(m, 'v', [I])
+        x = binvar(m, 'x', [I, K, T]) # provisioning
+        xint = binvar(m, 'xint', [I, K, T]) # provision internal
+        xext = binvar(m, 'xext', [I, K, T]) # provision external
+
+        Y = posvar(m, 'Y', [I, K, S, T], ub=ub_for_y) # inventory levels
+        v = posvar(m, 'v', [I]) # delays
 
         def setup_objective():
             delay_costs = gp.quicksum(c[i] * v[i] for i in I)
@@ -67,52 +68,52 @@ def solve(instance):
 
         def add_core_constraints():
             m.addConstrs((v[i] >= rd[0] + gp.quicksum(x[(i, 0, t)] * t for t in T) - due[i]
-                          for i in I if i > 0), 'delay')
+                          for i in I[1:]), 'delay')
 
             m.addConstrs((gp.quicksum(x[(i, k - 1, t)] * t for t in T) >= rd[k] + gp.quicksum(x[(i, k, t)] * t for t in T)
-                          for i in I for k in K if i > 0 and k > 0), 'reassembly_sequence')
+                          for i in I[1:] for k in K[1:]), 'reassembly_sequence')
 
             # FIXME: really needed?
             m.addConstrs((gp.quicksum(z[(i, k, s, t)] * t for t in T) >= ekt[i][k]
-                          for i in I for k in K for s in S if i > 0 and eks[i][k] == s), 'repair_after_arrival')
+                          for i in I[1:] for k in K for s in S if eks[i][k] == s), 'repair_after_arrival')
 
             m.addConstrs((gp.quicksum(z[(i, k, s, tau)] for i in I for s in S for tau in T if t - d[k][s] + 1 <= tau <= t) <= rc[k]
                           for k in K for t in T), 'capacity')
 
             m.addConstrs((gp.quicksum(z[(i, k, s, t)] for s in S for t in T) <= 1
-                          for i in I for k in K if i > 0), 'repair_internal_max_once')
+                          for i in I[1:] for k in K), 'repair_internal_max_once')
 
             m.addConstrs((gp.quicksum(x[(i, k, t)] for t in T) == 1
-                          for i in I for k in K if i > 0), 'provision_each_internal_once')
+                          for i in I[1:] for k in K), 'provision_each_internal_once')
 
             m.addConstrs((x[(i, k, t)] == xint[(i, k, t)] + xext[(i, k, t)]
-                          for i in I for k in K for t in T if i > 0), 'linkx')
+                          for i in I[1:] for k in K for t in T), 'linkx')
 
         def add_balance_equations():
-            m.addConstrs((Y[(i, k, s, t + 1)] ==
-                          Y[(i, k, s, t)] +
-                          gp.quicksum(z[(i, k, s2, tau)] for s2 in S for tau in T if tau == t - d[k][s2]) -
+            m.addConstrs((Y[(i, k, 0, t + 1)] ==
+                          Y[(i, k, 0, t)] +
+                          gp.quicksum(z[(i, k, s, tau)] for s in S for tau in T if tau == t - d[k][s]) -
                           xint[(i, k, t)]
-                          for i in I for k in K for t in T for s in S if i > 0 and t < len(T) and s == 0), 'balance_sa_internal')
+                          for i in I[1:] for k in K for t in T[:-1]), 'balance_sa_internal')
 
-            m.addConstrs((Y[(i, k, s, t + 1)] ==
-                          Y[(i, k, s, t)] +
-                          gp.quicksum(w[(k, s, tau)] for tau in T if tau == t - bd[k][s]) +
-                          gp.quicksum(z[i(i, k, s2, tau)] for s2 in S for tau in T if tau == t - d[k][s2]) -
-                          gp.quicksum(xext[(i2, k, t)] for i2 in I if i2 > 0)
-                          for k in K for t in T for s in S for i in I if s == 0 and i == 0), 'balance_sa_external')
+            m.addConstrs((Y[(0, k, 0, t + 1)] ==
+                          Y[(0, k, 0, t)] +
+                          gp.quicksum(w[(k, 0, tau)] for tau in T if tau == t - bd[k][0]) +
+                          gp.quicksum(z[(0, k, s, tau)] for s in S for tau in T if tau == t - d[k][s]) -
+                          gp.quicksum(xext[(i, k, t)] for i in I[1:])
+                          for k in K for t in T[:-1]), 'balance_sa_external')
 
             m.addConstrs((Y[(i, k, s, t + 1)] ==
                           Y[(i, k, s, t)] +
                           (1 if eks[i][k] == s and ekt[i][k] == t else 0) -
                           z[(i, k, s, t)]
-                          for i in I for k in K for s in S for t in T if i > 0 and s > 0), 'balance_nsa_internal')
+                          for i in I[1:] for k in K for s in S[1:] for t in T[:-1]), 'balance_nsa_internal')
 
-            m.addConstrs((Y[(i, k, s, t + 1)] ==
-                          Y[(i, k, s, t)] +
+            m.addConstrs((Y[(0, k, s, t + 1)] ==
+                          Y[(0, k, s, t)] +
                           gp.quicksum(w[(k, s, tau)] for tau in T if tau == t - bd[k][s]) -
-                          z[(i, k, s, t)]
-                          for i in I for k in K for s in S for t in T if s > 0 and i == 0), 'balance_nsa_external')
+                          z[(0, k, s, t)]
+                          for k in K for s in S[1:] for t in T[:-1]), 'balance_nsa_external')
 
         setup_objective()
         add_core_constraints()
@@ -126,18 +127,20 @@ def solve(instance):
             ready_times=nonzero_times_in_result(x),
             delays=[v[i].x for i in I],
             sa_inventory_levels={(i, k): [Y[i, k, 0, t].x for t in T] for i in I for k in K},
-            nsa_inventory_levels={(i, k, s): [Y[i, k, s, t].x for t in T] for i in I for k in K for s in S if s > 0},
+            nsa_inventory_levels={(i, k, s): [Y[i, k, s, t].x for t in T] for i in I for k in K for s in S[1:]},
             total_costs=m.objVal)
 
     except gp.GurobiError as e:
         print('Error code ' + str(e.errno) + ': ' + str(e))
+
     except AttributeError:
         print('Encountered an attribute error')
 
 
 def main(args):
     instance = generator.generate_instance(23, 2, 2, 2, 30)
-    solve(instance)
+    res = solve(instance)
+    print('')
 
 
 if __name__ == '__main__':
