@@ -84,20 +84,33 @@ def solve(instance):
             m.setObjective(delay_costs + housing_costs + order_costs, GRB.MINIMIZE)
 
         def add_core_constraints():
-            m.addConstrs((v[i] >= rd[0] + gp.quicksum(x[(i, 0, t)] * t for t in T) - due[i]
+            def provision_time_for_component(i, k): return gp.quicksum(x[(i, k, t)] * t for t in T)
+
+            def provision_time_of_fan(i): return provision_time_for_component(i, 0)
+
+            m.addConstrs((v[i] >= rd[0] + provision_time_of_fan(i) - due[i]
                           for i in I[1:]), 'delay')
 
-            m.addConstrs((gp.quicksum(x[(i, k - 1, t)] * t for t in T) >= rd[k] + gp.quicksum(x[(i, k, t)] * t for t in T)
+            m.addConstrs((provision_time_for_component(i, k - 1) >= rd[k] + provision_time_for_component(i, k)
                           for i in I[1:] for k in K[1:]), 'reassembly_sequence')
 
             # FIXME: really needed?
-            m.addConstrs((gp.quicksum(z[(i, k, s, t)] * t for t in T) >= ekt[i][k]
+            def repair_start(i, k, s):
+                return gp.quicksum(z[(i, k, s, t)] * t for t in T)
+
+            m.addConstrs((repair_start(i, k, s) >= ekt[i][k]
                           for i in I[1:] for k in K for s in S if eks[i][k] == s), 'repair_after_arrival')
 
-            m.addConstrs((gp.quicksum(z[(i, k, s, tau)] for i in I for s in S for tau in T if t - d[k][s] + 1 <= tau <= t) <= rc[k]
+            def in_time_window_for_repair(k, s, t, tau):
+                return t - d[k][s] + 1 <= tau <= t
+
+            m.addConstrs((gp.quicksum(z[(i, k, s, tau)] for i in I for s in S for tau in T if in_time_window_for_repair(k, s, t, tau)) <= rc[k]
                           for k in K for t in T), 'capacity')
 
-            m.addConstrs((gp.quicksum(z[(i, k, s, t)] for s in S for t in T) <= 1
+            def repair_count(i, k):
+                return gp.quicksum(z[(i, k, s, t)] for s in S for t in T)
+
+            m.addConstrs((repair_count(i, k) <= 1
                           for i in I[1:] for k in K), 'repair_internal_max_once')
 
             m.addConstrs((gp.quicksum(x[(i, k, t)] for t in T) == 1
@@ -138,8 +151,6 @@ def solve(instance):
 
         m.optimize()
 
-        #xsraw = [[[x[(i, k, t)].x for t in T] for k in K] for i in I]
-
         return dict(
             repair_starts=nonzero_times_in_result(z),
             order_starts=nonzero_times_in_result(w),
@@ -155,10 +166,27 @@ def solve(instance):
         print('Encountered an attribute error')
 
 
+def print_results(instance, res_dict):
+    print(f'Costs of this regeneration plan are in total {res_dict["total_costs"]} monetary units')
+
+    def inc(coll):
+        return tuple(v+1 for v in coll)
+
+    def print_result_line(caption, res_dict_key, sep=', '):
+        newline = '\n'
+        print(f'{caption}:{sep if sep == newline else " "}{sep.join("piece " + str(inc(k)) + " at " + str(v) for k, v in res_dict[res_dict_key].items())}')
+
+    print_result_line('Repairs', 'repair_starts')
+    print_result_line('Orders', 'order_starts')
+    print_result_line('Provisioning times', 'ready_times', sep='\n')
+    for i in range(instance['ngoods']):
+        print(f'Delay of good {i+1} is {res_dict["delays"][i]} time units')
+
+
 def main(args):
     instance = generator.generate_instance(23, 2, 2, 2, 30)
     res = solve(instance)
-    print('')
+    print_results(instance, res)
 
 
 if __name__ == '__main__':
