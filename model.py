@@ -14,7 +14,7 @@ def nonzero_times_in_result(var):
     return {k[:-1]: k[-1] for k, v in var.items() if v.x > 0.0}
 
 
-def extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, due, c):
+def extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, eksreal, due, c):
     I += [len(I)]
 
     def add_entry_for_external_good(param1d):
@@ -23,27 +23,21 @@ def extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, due, c):
     def add_row_for_external_good(param2d):
         return [[param2d[i - 1][k] if i > 0 else -1 for k in K] for i in I]
 
-    ekt, eks = map(add_row_for_external_good, [ekt, eks])
+    ekt, eks, eksreal = map(add_row_for_external_good, [ekt, eks, eksreal])
     due, c = map(add_entry_for_external_good, [due, c])
 
-    return I, ekt, eks, due, c
+    return I, ekt, eks, eksreal, due, c
 
 
-def solve(instance):
-    origin_restricted = False
-
+def solve(instance, origin_restricted = False):
     I, K, S, T = sets_from_instance(instance)
-    ekt, eks, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
-
-    I, ekt, eks, due, c = extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, due, c)
+    ekt, eks, eksreal, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
+    I, ekt, eks, eksreal, due, c = extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, eksreal, due, c)
 
     # first good i=0 is external (dummy) good
-    i_external_good = 0
     # first component k=0 is fan. disassembly: outside -> inside (fan is first), reassembly: inside -> outside (fan is last)
-    k_fan_component = 0
     # first damage pattern s=0 is 'good as new', increasing pattern means increased damage
-    s_good_as_new = 0
-
+    i_external_good, k_fan_component, s_good_as_new = 0, 0, 0
     internal_items = I[1:]
 
     try:
@@ -81,12 +75,6 @@ def solve(instance):
 
             m.addConstrs((provision_time_for_component(i, k - 1) >= rd[k] + provision_time_for_component(i, k)
                           for i in internal_items for k in K[1:]), 'reassembly_sequence')
-
-            # FIXME: really needed?
-            '''def repair_start(i, k, s):
-                return gp.quicksum(z[(i, k, s, t)] * t for t in T)
-            m.addConstrs((repair_start(i, k, s) >= ekt[i][k]
-                          for i in internal_items for k in K for s in S if eks[i][k] == s), 'repair_after_arrival')'''
 
             def in_time_window_for_repair(k, s, t, tau):
                 return t - d[k][s] + 1 <= tau <= t
@@ -160,7 +148,7 @@ def solve(instance):
 
 
 def print_results(instance, res_dict):
-    print(f'Costs of this regeneration plan are in total {res_dict["total_costs"]} monetary units')
+    print(f'\nCosts of this regeneration plan are in total {res_dict["total_costs"]} monetary units')
 
     def inc(tpl):
         return tuple(v + 1 for v in tpl)
@@ -169,14 +157,22 @@ def print_results(instance, res_dict):
         assert (len(index_names) == len(tpl))
         return '(' + ';'.join(f'{index_names[ix]}={v}' for ix, v in enumerate(tpl)) + ')'
 
-    def print_result_line(caption, res_dict_key, index_names_str, sep=', '):
+    def print_result_line(caption, res_dict_key, index_names_str, sep=', ', with_arrival=None):
         newline = '\n'
         index_names = list(index_names_str)
-        print(f'{caption}:{sep if sep == newline else " "}{sep.join("piece " + str(named(index_names, inc(k))) + " at " + str(v) for k, v in res_dict[res_dict_key].items())}')
+
+        def arrival_str(arrival_data_func, tpl):
+            i, k = tpl
+            eks, ekt = arrival_data_func(i, k)
+            return f' arrival(s={eks},t={ekt})'
+
+        print(f'\n{caption}:{sep if sep == newline else " "}{sep.join("piece " + str(named(index_names, inc(k))) + (arrival_str(with_arrival, k) if with_arrival is not None else "") + " at period " + str(v) for k, v in res_dict[res_dict_key].items())}')
 
     print_result_line('Repairs', 'repair_starts', 'iks')
     print_result_line('Orders', 'order_starts', 'ks')
-    print_result_line('Provisioning times', 'ready_times', 'ik', sep='\n')
+    print_result_line('Provisioning times', 'ready_times', 'ik', sep='\n', with_arrival=lambda i, k: (instance['eks'][i-1][k], instance['ekt'][i-1][k]))
+
+    print('')
 
     for i in range(instance['ngoods']):
         print(f'Delay of good {i + 1} is {res_dict["delays"][i]} time units')

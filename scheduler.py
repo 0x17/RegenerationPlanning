@@ -22,7 +22,7 @@ def resource_busy(k, repair_starts, repair_durations, damage_patterns, t):
 # - repair and order starts
 def generate_schedule(instance, item_sources, good_priorities):
     I, K, S, T = sets_from_instance(instance)
-    ekt, eks, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
+    ekt, eks, eksreal, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
     items = [(i, k) for i in I for k in K]
 
     damage_patterns = {(i, k): eks[i][k] for i, k in items}
@@ -46,7 +46,7 @@ def generate_schedule(instance, item_sources, good_priorities):
 
 def derive_costs_from_schedule(instance, repair_starts, order_starts):
     I, K, S, T = sets_from_instance(instance)
-    ekt, eks, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
+    ekt, eks, eksreal, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
     items = [(i, k) for i in I for k in K]
 
     def ready_date_for_item(i, k):
