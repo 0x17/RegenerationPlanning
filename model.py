@@ -10,8 +10,11 @@ from instance_helpers import values_from_instance, sets_from_instance
 from gurobi_utils import binvar, posvar
 
 
-def nonzero_times_in_result(var):
-    return {k[:-1]: k[-1] for k, v in var.items() if v.x > 0.0}
+def nonzero_times_in_result(var, dec_first=False):
+    def f(tpl):
+        return (tpl[0] - 1,) + tpl[1:] if dec_first else tpl
+
+    return {f(k[:-1]): k[-1] for k, v in var.items() if v.x > 0.0}
 
 
 def extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, eksreal, due, c):
@@ -29,7 +32,7 @@ def extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, eksreal, due,
     return I, ekt, eks, eksreal, due, c
 
 
-def solve(instance, origin_restricted = False):
+def solve(instance, origin_restricted=False):
     I, K, S, T = sets_from_instance(instance)
     ekt, eks, eksreal, due, c, rd, rc, hc, d, bd, bc = values_from_instance(instance)
     I, ekt, eks, eksreal, due, c = extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, eksreal, due, c)
@@ -49,7 +52,7 @@ def solve(instance, origin_restricted = False):
         def ub_for_z(i, k, s, t):
             return 0.0 if t == len(T) or s == 0 or (origin_restricted and i == i_external_good) else GRB.INFINITY
 
-        z = binvar(m, 'z', [I, K, S, T], ub=ub_for_z)  # repair internal
+        z = binvar(m, 'z', [I, K, S, T], ub=ub_for_z)  # repair
         w = binvar(m, 'w', [K, S, T])  # order
 
         x = binvar(m, 'x', [I, K, T])  # provisioning
@@ -133,10 +136,10 @@ def solve(instance, origin_restricted = False):
         m.optimize()
 
         return dict(
-            repair_starts=nonzero_times_in_result(z),
+            repair_starts=nonzero_times_in_result(z, dec_first=True),
             order_starts=nonzero_times_in_result(w),
-            ready_times=nonzero_times_in_result(x),
-            delays=[v[i].x for i in I],
+            ready_times=nonzero_times_in_result(x, dec_first=True),
+            delays=[v[i].x for i in internal_items],
             sa_inventory_levels={(i, k): [Y[i, k, 0, t].x for t in T] for i in I for k in K},
             nsa_inventory_levels={(i, k, s): [Y[i, k, s, t].x for t in T] for i in I for k in K for s in S[1:]},
             total_costs=m.objVal)
@@ -166,20 +169,31 @@ def print_results(instance, res_dict):
             eks, ekt = arrival_data_func(i, k)
             return f' arrival(s={eks},t={ekt})'
 
-        print(f'\n{caption}:{sep if sep == newline else " "}{sep.join("piece " + str(named(index_names, inc(k))) + (arrival_str(with_arrival, k) if with_arrival is not None else "") + " at period " + str(v) for k, v in res_dict[res_dict_key].items())}')
+        print(f'\n{caption}:{sep if sep == newline else " "}' +
+              f'{sep.join("piece " + str(named(index_names, inc(k))) + (arrival_str(with_arrival, k) if with_arrival is not None else "") + " at period " + str(v) for k, v in res_dict[res_dict_key].items())}')
 
     print_result_line('Repairs', 'repair_starts', 'iks')
     print_result_line('Orders', 'order_starts', 'ks')
-    print_result_line('Provisioning times', 'ready_times', 'ik', sep='\n', with_arrival=lambda i, k: (instance['eks'][i-1][k], instance['ekt'][i-1][k]))
+    print_result_line('Provisioning times', 'ready_times', 'ik', sep='\n', with_arrival=lambda i, k: (instance['eks'][i][k], instance['ekt'][i][k]))
 
     print('')
 
     for i in range(instance['ngoods']):
-        print(f'Delay of good {i + 1} is {res_dict["delays"][i]} time units')
+        print(f'Delay of good {i} is {res_dict["delays"][i]} time units')
+
+    print('')
+
+    for i in range(instance['ngoods']):
+        for k in range(instance['ncomponents']):
+            ekt, eks = instance['ekt'][i][k], instance['eks'][i][k]
+            action = 'repair' if any(i == i2 and k == k2 for i2, k2, s in res_dict['repair_starts']) else 'order'
+            action_start = res_dict['repair_starts'][(i, k, eks)] if action == 'repair' else 0
+            provision_ready = res_dict['ready_times'][(i, k)]
+            print(f'Item ({i},{k}) arrives at {ekt} with damage pattern {eks} and was provisioned using {action} starting at {action_start} with provisioning time at period {provision_ready}')
 
 
 def main(args):
-    instance = generator.generate_instance(23, 2, 2, 2, 30)
+    instance = generator.generate_instance(23, 2, 3, 3, 30)
     res = solve(instance)
     print_results(instance, res)
 
