@@ -35,5 +35,10 @@ def random_values_matrix_row_ascending(nrows, ncols, min, max):
 def remove_none_entries(dict):
     return {k: v for k, v in dict.items() if v is not None}
 
+
 def strs(coll):
     return (str(v) for v in coll)
+
+
+def average(coll):
+    return sum(coll) / len(coll)
