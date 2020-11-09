@@ -41,6 +41,9 @@ def solve(instance, origin_restricted=False):
     try:
         m = gp.Model("regeneration-planning-mip")
 
+        m.params.output_flag = 0
+        m.params.threads = 0
+
         def ub_for_y(i, k, s, t):
             return GRB.INFINITY if 0 < t < len(T) else 0.0
 
