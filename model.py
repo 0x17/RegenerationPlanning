@@ -5,11 +5,8 @@ from gurobipy import GRB
 
 import generator
 import result_plotter
-import result_printer
-
-from instance_helpers import values_from_instance, sets_from_instance
-
 from gurobi_utils import binvar, posvar
+from instance_helpers import values_from_instance, sets_from_instance
 
 
 def extend_exogenous_data_with_dummy_external_good(I, K, ekt, eks, eksreal, due, c):
