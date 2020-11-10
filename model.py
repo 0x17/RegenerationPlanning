@@ -4,6 +4,7 @@ import gurobipy as gp
 from gurobipy import GRB
 
 import generator
+import result_plotter
 import result_printer
 
 from instance_helpers import values_from_instance, sets_from_instance
@@ -162,7 +163,8 @@ def solve(instance, origin_restricted=False):
 def main(args):
     instance = generator.generate_instance(23, 2, 3, 3, 30)
     res = solve(instance)
-    result_printer.print_results(instance, res)
+    #result_printer.print_results(instance, res)
+    result_plotter.print_results(instance, res)
 
 
 if __name__ == '__main__':
