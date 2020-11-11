@@ -36,24 +36,31 @@ def solve(instance, origin_restricted=False):
     i_external_good, k_fan_component, s_good_as_new = 0, 0, 0
     internal_items = I[1:]
 
+    def is_internal(i):
+        return i != i_external_good
+
     try:
         m = gp.Model("regeneration-planning-mip")
 
-        m.params.output_flag = 0
+        # m.params.output_flag = 0
         m.params.threads = 0
 
         def ub_for_y(i, k, s, t):
             return GRB.INFINITY if 0 < t < len(T) else 0.0
 
         def ub_for_z(i, k, s, t):
-            return 0.0 if t == len(T) or s == 0 or (origin_restricted and i == i_external_good) else GRB.INFINITY
+            return  float(t != len(T) and s != 0)
+
+        def ub_for_x(i, istar, k, t):
+            return float(is_internal(istar))
+
+        def ub_for_w(k, s, t):
+            return float(not origin_restricted or s == s_good_as_new)
 
         z = binvar(m, 'z', [I, K, S, T], ub=ub_for_z)  # repair
-        w = binvar(m, 'w', [K, S, T])  # order
+        w = binvar(m, 'w', [K, S, T], ub=ub_for_w)  # order
 
-        x = binvar(m, 'x', [I, K, T])  # provisioning
-        xint = binvar(m, 'xint', [I, K, T])  # provision internal
-        xext = binvar(m, 'xext', [I, K, T])  # provision external
+        x = binvar(m, 'x', [I, I, K, T], ub=ub_for_x)  # provisioning: origin i1 to reassembly target i2
 
         Y = posvar(m, 'Y', [I, K, S, T], ub=ub_for_y)  # inventory levels
         v = posvar(m, 'v', [I])  # delays
@@ -65,7 +72,7 @@ def solve(instance, origin_restricted=False):
             m.setObjective(delay_costs + housing_costs + order_costs, GRB.MINIMIZE)
 
         def add_core_constraints():
-            def provision_time_for_component(i, k): return gp.quicksum(x[(i, k, t)] * t for t in T)
+            def provision_time_for_component(i, k): return gp.quicksum(x[(iorigin, i, k, t)] * t for iorigin in I for t in T)
 
             def provision_time_of_fan(i): return provision_time_for_component(i, k_fan_component)
 
@@ -87,43 +94,38 @@ def solve(instance, origin_restricted=False):
             m.addConstrs((repair_count(i, k) <= 1
                           for i in internal_items for k in K), 'repair_internal_max_once')
 
-            m.addConstrs((gp.quicksum(x[(i, k, t)] for t in T) == 1
-                          for i in internal_items for k in K), 'provision_each_internal_once')
+            m.addConstrs((gp.quicksum(x[(i, istar, k, t)] for i in I for t in T) == 1
+                          for istar in internal_items for k in K), 'provision_each_internal_once')
 
-            m.addConstrs((x[(i, k, t)] == xint[(i, k, t)] + xext[(i, k, t)]
-                          for i in internal_items for k in K for t in T), 'linkx')
+            if origin_restricted:
+                m.addConstr(gp.quicksum(x[(i, istar, k, t)] for i in internal_items for k in K for t in T for istar in internal_items if i != istar) == 0, name='prevent_provision_from_other_internal_when_origin_restricted')
 
         def add_balance_equations():
             def repair_arrivals(i, k, t):
                 return gp.quicksum(z[(i, k, s, tau)] for s in S for tau in T if tau == t - d[k][s])
 
+            def order_arrivals(k, s, t):
+                return gp.quicksum(w[(k, s, tau)] for tau in T if tau == t - bd[k][s])
+
+            def provisioning_to_any_internal_target(i, k, t):
+                return gp.quicksum(x[(i, i_target, k, t)] for i_target in internal_items)
+
             m.addConstrs((Y[(i, k, s_good_as_new, t + 1)] ==
                           Y[(i, k, s_good_as_new, t)] +
-                          repair_arrivals(i, k, t) -
-                          xint[(i, k, t)]
-                          for i in internal_items for k in K for t in T[:-1]), 'balance_sa_internal')
-
-            m.addConstrs((Y[(i_external_good, k, s_good_as_new, t + 1)] ==
-                          Y[(i_external_good, k, s_good_as_new, t)] +
-                          gp.quicksum(w[(k, s_good_as_new, tau)] for tau in T if tau == t - bd[k][s_good_as_new]) +
-                          repair_arrivals(i_external_good, k, t) -
-                          gp.quicksum(xext[(i, k, t)] for i in internal_items)
-                          for k in K for t in T[:-1]), 'balance_sa_external')
+                          (order_arrivals(k, s_good_as_new, t) if i == i_external_good else 0) +
+                          repair_arrivals(i, k, t) +
+                          -provisioning_to_any_internal_target(i, k, t)
+                          for i in I for k in K for t in T[:-1]), 'balance_sa')
 
             def disassembly_arrival_count(i, k, s, t):
                 return int(eks[i][k] == s and ekt[i][k] == t)
 
             m.addConstrs((Y[(i, k, s, t + 1)] ==
                           Y[(i, k, s, t)] +
-                          disassembly_arrival_count(i, k, s, t) -
-                          z[(i, k, s, t)]
-                          for i in internal_items for k in K for s in S[1:] for t in T[:-1]), 'balance_nsa_internal')
-
-            m.addConstrs((Y[(i_external_good, k, s, t + 1)] ==
-                          Y[(i_external_good, k, s, t)] +
-                          gp.quicksum(w[(k, s, tau)] for tau in T if tau == t - bd[k][s]) -
-                          z[(i_external_good, k, s, t)]
-                          for k in K for s in S[1:] for t in T[:-1]), 'balance_nsa_external')
+                          (disassembly_arrival_count(i, k, s, t) if is_internal(i) else 0) +
+                          (order_arrivals(k, s, t) if i == i_external_good else 0) +
+                          -z[(i, k, s, t)]
+                          for i in I for k in K for s in S[1:] for t in T[:-1]), 'balance_nsa')
 
         setup_objective()
         add_core_constraints()
@@ -131,16 +133,16 @@ def solve(instance, origin_restricted=False):
 
         m.optimize()
 
-        def nonzero_times_in_result(var, dec_first=False):
-            def f(tpl):
-                return (tpl[0] - 1,) + tpl[1:] if dec_first else tpl
+        if m.status == GRB.INFEASIBLE:
+            raise Exception('No solution found!')
 
-            return {f(k[:-1]): k[-1] for k, v in var.items() if v.x > 0.0}
+        def nonzero_times_in_result(var):
+            return {k[:-1]: k[-1] for k, v in var.items() if v.x > 0.0}
 
         return dict(
-            repair_starts=nonzero_times_in_result(z, dec_first=True),
+            repair_starts=nonzero_times_in_result(z),
             order_starts=nonzero_times_in_result(w),
-            ready_times=nonzero_times_in_result(x, dec_first=True),
+            ready_times=nonzero_times_in_result(x),
             delays=[v[i].x for i in internal_items],
 
             sa_inventory_levels={(i, k): [Y[i, k, 0, t].x for t in T] for i in I for k in K},
@@ -158,9 +160,9 @@ def solve(instance, origin_restricted=False):
 
 
 def main(args):
-    instance = generator.generate_instance(23, 2, 3, 3, 30)
-    res = solve(instance)
-    #result_printer.print_results(instance, res)
+    instance = generator.generate_instance(23, 2, 3, 3, nperiods=160)
+    res = solve(instance, origin_restricted=False)
+    # result_printer.print_results(instance, res)
     result_plotter.print_results(instance, res)
 
 

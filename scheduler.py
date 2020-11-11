@@ -65,7 +65,7 @@ def derive_costs_from_schedule(instance, repair_starts, order_starts):
 
 
 def main(args):
-    instance = generator.generate_instance(23, 2, 2, 2, 30)
+    instance = generator.generate_instance(23, 2, 2, 2)
     res = generate_schedule(instance, item_sources={(0, 0): None,
                                                     (0, 1): (1, 1),
                                                     (1, 0): (0, 0),

@@ -1,8 +1,20 @@
 from utils import *
 
 
-def generate_instance(seed, ngoods, ncomponents, ndamagepatterns, nperiods):
+def generate_instance(seed, ngoods, ncomponents, ndamagepatterns, nperiods=None):
     set_seed(seed)
+
+    repair_duration = random_values_matrix_row_ascending_discrete(ncomponents, ndamagepatterns, min=1, max=62)
+    reassembly_duration = random_values_discrete(ncomponents, min=1, max=4)
+    disassembly_arrival = random_values_matrix_row_ascending_discrete(ngoods, ncomponents, min=0, max=15)
+
+    if nperiods is None:
+        upper_bound_for_total_repair_time = sum(max(repair_duration[k][s] for s in range(ndamagepatterns)) for i in range(ngoods) for k in range(ncomponents))
+        upper_bound_for_total_reassembly_time = sum(max(repair_duration[k][s] for s in range(ndamagepatterns)) for i in range(ngoods) for k in range(ncomponents))
+        latest_arrival_from_disassembly = max(disassembly_arrival[i][k] for i in range(ngoods) for k in range(ncomponents))
+
+        nperiods = upper_bound_for_total_repair_time + upper_bound_for_total_reassembly_time + latest_arrival_from_disassembly
+
     return dict(
         # Set cardinalities
         ngoods=ngoods,
@@ -12,17 +24,17 @@ def generate_instance(seed, ngoods, ncomponents, ndamagepatterns, nperiods):
 
         # Disassembly arrival information
         # time of arrival of item i, k
-        ekt=random_values_matrix_row_ascending_discrete(ngoods, ncomponents, min=0, max=15),
+        ekt=disassembly_arrival,
         # damage pattern at arrival of item i, k (predicted)
-        eks=random_values_matrix_discrete(ngoods, ncomponents, min=1, max=ndamagepatterns),
+        eks=random_values_matrix_discrete(ngoods, ncomponents, min=1, max=ndamagepatterns - 1),
         # damage pattern after inspection of item i, k (actual)
-        eksreal=random_values_matrix_discrete(ngoods, ncomponents, min=2, max=ndamagepatterns),
+        eksreal=random_values_matrix_discrete(ngoods, ncomponents, min=2, max=ndamagepatterns - 1),
 
         # Durations
         # reassembly duration of component k
-        rd=random_values_discrete(ncomponents, min=1, max=4),
+        rd=reassembly_duration,
         # repair duration of component k with damage pattern s
-        d=random_values_matrix_row_ascending_discrete(ncomponents, ndamagepatterns, min=1, max=62),
+        d=repair_duration,
         # order duration of component k with damage pattern s
         bd=random_values_matrix_row_ascending_discrete(ncomponents, ndamagepatterns, min=1, max=4),
 
@@ -44,5 +56,6 @@ def generate_instance(seed, ngoods, ncomponents, ndamagepatterns, nperiods):
 
 if __name__ == '__main__':
     import json
-    inst = generate_instance(1, 2, 3, 3, 300)
+
+    inst = generate_instance(1, 2, 3, 3)
     print(json.dumps(inst, indent=True, sort_keys=True))

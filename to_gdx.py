@@ -42,5 +42,5 @@ def convert_instance(obj, out_gdx_fn):
 if __name__ == '__main__':
     import generator
 
-    inst = generator.generate_instance(1, 2, 3, 3, 300)
+    inst = generator.generate_instance(1, 2, 3, 3)
     convert_instance(inst, 'myinst.gdx')

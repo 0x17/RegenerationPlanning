@@ -86,7 +86,7 @@ def experiment_delay_costs_second(instance, ngoods):
 
 def main(args):
     ngoods = 2
-    instance = generator.generate_instance(23, ngoods, 4, 3, 120)
+    instance = generator.generate_instance(23, ngoods, 4, 3, nperiods=200)
     # instance['due'] = [0]*ngoods
     experiment_delay_costs_first(instance, ngoods)
     experiment_delay_costs_second(instance, ngoods)
