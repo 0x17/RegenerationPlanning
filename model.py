@@ -5,6 +5,7 @@ from gurobipy import GRB
 
 import generator
 import result_plotter
+import result_validator
 from gurobi_utils import binvar, posvar
 from instance_helpers import values_from_instance, sets_from_instance
 
@@ -161,9 +162,13 @@ def solve(instance, origin_restricted=False):
 
 def main(args):
     instance = generator.generate_instance(23, 2, 3, 3, nperiods=160)
-    res = solve(instance, origin_restricted=False)
+    res = solve(instance, origin_restricted=True)
     # result_printer.print_results(instance, res)
-    result_plotter.print_results(instance, res)
+    # result_plotter.print_results(instance, res)
+    fails = result_validator.validate_results(instance, res)
+    for ix, fail in enumerate(fails):
+        print(f'Fail #{ix}: {fail}')
+
 
 
 if __name__ == '__main__':
